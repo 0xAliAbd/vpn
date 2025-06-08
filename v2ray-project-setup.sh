@@ -550,6 +550,7 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use tauri::State;
 use uuid::Uuid;
+use base64::Engine as _; // Added for base64::engine::general_purpose::STANDARD
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct V2RayConfig {
@@ -617,7 +618,7 @@ fn convert_to_v2ray_config(config_str: &str) -> Result<String, String> {
         
         let at_split: Vec<&str> = main_part.split('@').collect();
         if at_split.len() == 2 {
-            let method_password = String::from_utf8(base64::decode(at_split[0]).unwrap_or_default()).unwrap_or_default();
+            let method_password = String::from_utf8(base64::engine::general_purpose::STANDARD.decode(at_split[0]).unwrap_or_default()).unwrap_or_default();
             let method_pass_parts: Vec<&str> = method_password.split(':').collect();
             
             if method_pass_parts.len() >= 2 {
@@ -726,7 +727,7 @@ fn convert_to_v2ray_config(config_str: &str) -> Result<String, String> {
     // Convert VMess to V2Ray config
     if config_str.starts_with("vmess://") {
         let encoded = config_str.trim_start_matches("vmess://");
-        if let Ok(decoded) = base64::decode(encoded) {
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
             if let Ok(json_str) = String::from_utf8(decoded) {
                 if let Ok(vmess_config) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     let address = vmess_config.get("add").and_then(|v| v.as_str()).unwrap_or("");
@@ -837,7 +838,7 @@ fn parse_v2ray_config(config_str: &str) -> Result<(String, String), String> {
     // Parse VMess (vmess://)
     if config_str.starts_with("vmess://") {
         let encoded = config_str.trim_start_matches("vmess://");
-        if let Ok(decoded) = base64::decode(encoded) {
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
             if let Ok(json_str) = String::from_utf8(decoded) {
                 if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     let name = json_value.get("ps").and_then(|v| v.as_str()).unwrap_or("VMess Config").to_string();
@@ -998,17 +999,26 @@ async fn is_connected(state: State<'_, AppStateType>) -> Result<bool, String> {
 
 #[tauri::command]
 async fn ping_test(id: String, state: State<'_, AppStateType>) -> Result<u64, String> {
-    let app_state = state.lock().unwrap();
-    let _config = app_state.configs.iter().find(|c| c.id == id).ok_or("Config not found")?;
-    
+    // Scope for the MutexGuard
+    {
+        let app_state = state.lock().unwrap();
+        // Check if config exists, but don't hold the lock longer than necessary.
+        if !app_state.configs.iter().any(|c| c.id == id) {
+            return Err("Config not found".to_string());
+        }
+    } // MutexGuard (`app_state`) is dropped here
+
     // Simple ping test to Google DNS
     let start = std::time::Instant::now();
-    let response = reqwest::get("https://8.8.8.8").await;
+    // Create a new client for this request to ensure Send safety if client isn't inherently Send
+    let client = reqwest::Client::new();
+    let response = client.get("https://8.8.8.8").send().await;
     let duration = start.elapsed();
     
     match response {
-        Ok(_) => Ok(duration.as_millis() as u64),
-        Err(_) => Err("Ping failed".to_string()),
+        Ok(res) if res.status().is_success() => Ok(duration.as_millis() as u64),
+        Ok(res) => Err(format!("Ping request returned non-OK status: {}", res.status())),
+        Err(e) => Err(format!("Ping failed: {}", e)),
     }
 }
 

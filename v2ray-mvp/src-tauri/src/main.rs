@@ -459,17 +459,26 @@ async fn is_connected(state: State<'_, AppStateType>) -> Result<bool, String> {
 
 #[tauri::command]
 async fn ping_test(id: String, state: State<'_, AppStateType>) -> Result<u64, String> {
-    let app_state = state.lock().unwrap();
-    let _config = app_state.configs.iter().find(|c| c.id == id).ok_or("Config not found")?;
+    // Scope for the MutexGuard
+    {
+        let app_state = state.lock().unwrap();
+        // Check if config exists, but don't hold the lock longer than necessary.
+        if !app_state.configs.iter().any(|c| c.id == id) {
+            return Err("Config not found".to_string());
+        }
+    } // MutexGuard (`app_state`) is dropped here
 
     // Simple ping test to Google DNS
     let start = std::time::Instant::now();
-    let response = reqwest::get("https://8.8.8.8").await;
+    // Create a new client for this request to ensure Send safety if client isn't inherently Send
+    let client = reqwest::Client::new();
+    let response = client.get("https://8.8.8.8").send().await;
     let duration = start.elapsed();
 
     match response {
-        Ok(_) => Ok(duration.as_millis() as u64),
-        Err(_) => Err("Ping failed".to_string()),
+        Ok(res) if res.status().is_success() => Ok(duration.as_millis() as u64),
+        Ok(res) => Err(format!("Ping request returned non-OK status: {}", res.status())),
+        Err(e) => Err(format!("Ping failed: {}", e)),
     }
 }
 
