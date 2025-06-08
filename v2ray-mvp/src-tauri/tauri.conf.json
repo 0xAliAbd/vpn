@@ -1,9 +1,10 @@
 {
   "build": {
-    "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devPath": "../src",
-    "distDir": "../dist"
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist",
+    "withGlobalTauri": true
   },
   "package": {
     "productName": "V2Ray MVP",
@@ -11,7 +12,42 @@
   },
   "tauri": {
     "allowlist": {
-      "all": false
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true
+      },
+      "fs": {
+        "all": false,
+        "readFile": true,
+        "writeFile": true,
+        "createDir": true,
+        "scope": ["$APPCONFIG/*", "$APPCONFIG/current_config.json", "$APPCONFIG/state.json"]
+      },
+      "path": {
+        "all": true
+      },
+      "process": {
+         "all": false,
+         "exit": true,
+         "relaunch": true
+      },
+       "window": {
+        "all": false,
+        "create": true,
+        "close": true,
+        "hide": true,
+        "show": true,
+        "maximize": true,
+        "minimize": true,
+        "unmaximize": true,
+        "unminimize": true,
+        "startDragging": true
+      },
+      "http": {
+        "all": true,
+        "scope": ["https://*"]
+      }
     },
     "bundle": {
       "active": true,
@@ -28,7 +64,7 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "identifier": "com.tauri.dev",
+      "identifier": "com.v2raymvp.dev",
       "longDescription": "",
       "macOS": {
         "entitlements": null,
@@ -55,10 +91,11 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 600,
+        "height": 720,
         "resizable": true,
         "title": "V2Ray Client",
-        "width": 800
+        "width": 1280,
+        "visible": true
       }
     ]
   }

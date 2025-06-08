@@ -69,43 +69,153 @@ package-lock.json
 # Add other project-specific ignores as needed
 EOF
 
-    cargo tauri init --ci --app-name "V2Ray MVP" --window-title "V2Ray Client" --dist-dir "../dist" --dev-path "../src"
+    cargo tauri init --ci --app-name "V2Ray MVP" --window-title "V2Ray Client" # Removed --dist-dir and --dev-path
     
-    # Create package.json with all necessary scripts
-    cat > package.json << EOF
+    echo "Overwriting src-tauri/tauri.conf.json with known-good configuration..."
+    cat > src-tauri/tauri.conf.json << 'EOF_TAURI_CONF'
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "productName": "V2Ray MVP",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true
+      },
+      "fs": {
+        "all": false,
+        "readFile": true,
+        "writeFile": true,
+        "createDir": true,
+        "scope": ["$APPCONFIG/*", "$APPCONFIG/current_config.json", "$APPCONFIG/state.json"]
+      },
+      "path": {
+        "all": true
+      },
+      "process": {
+         "all": false,
+         "exit": true,
+         "relaunch": true
+      },
+       "window": {
+        "all": false,
+        "create": true,
+        "close": true,
+        "hide": true,
+        "show": true,
+        "maximize": true,
+        "minimize": true,
+        "unmaximize": true,
+        "unminimize": true,
+        "startDragging": true
+      },
+      "http": {
+        "all": true,
+        "scope": ["https://*"]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "category": "DeveloperTool",
+      "copyright": "",
+      "deb": {
+        "depends": []
+      },
+      "externalBin": [],
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "identifier": "com.v2raymvp.dev",
+      "longDescription": "",
+      "macOS": {
+        "entitlements": null,
+        "exceptionDomain": "",
+        "frameworks": [],
+        "providerShortName": null,
+        "signingIdentity": null
+      },
+      "resources": [],
+      "shortDescription": "",
+      "targets": "all",
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": ""
+      }
+    },
+    "security": {
+      "csp": null
+    },
+    "updater": {
+      "active": false
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 720,
+        "resizable": true,
+        "title": "V2Ray Client",
+        "width": 1280,
+        "visible": true
+      }
+    ]
+  }
+}
+EOF_TAURI_CONF
+
+    # Create package.json with all necessary scripts and dependencies
+    cat > package.json << EOF_PKG
 {
   "name": "${PROJECT_NAME}",
-  "version": "1.0.0",
-  "description": "V2Ray MVP Tauri App",
-  "main": "index.js",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
-    "test": "echo \"Tests not yet implemented\"",
-    "dev": "tauri dev",
-    "build": "tauri build",
-    "tauri": "tauri"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
-  "keywords": ["v2ray", "tauri", "mvp"],
-  "author": "MVP Builder",
-  "license": "ISC"
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@tauri-apps/api": "^1.5.0",
+    "lucide-react": "latest"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.0",
+    "tailwindcss": "3.4.3",
+    "postcss": "^8.4.32",
+    "autoprefixer": "^10.4.16",
+    "@tauri-apps/cli": "^1.5.0"
+  }
 }
-EOF
+EOF_PKG
 }
 
 # Install dependencies
 install_dependencies() {
-    echo "📦 Installing dependencies..."
+    echo "📦 Installing dependencies from package.json..."
+    npm install --legacy-peer-deps # Installs all dependencies listed in package.json
     
-    # Frontend dependencies
-    npm install react@^18.2.0 react-dom@^18.2.0
-    npm install @tauri-apps/api
-    npm install lucide-react
-    npm install tailwindcss@3.4.3 autoprefixer postcss --legacy-peer-deps
-    npm install -D @vitejs/plugin-react vite --legacy-peer-deps # Keeping --legacy-peer-deps as it was in original script
-
-    # Ensure installs are complete before running npx
-    # npm install --legacy-peer-deps # This line can be kept commented or removed
-    
-    # Initialize Tailwind
+    # Initialize Tailwind (postcss.config.js and tailwind.config.js are created by this)
+    echo "Initializing Tailwind CSS..."
     npx tailwindcss init -p
     
     # Backend dependencies (Cargo.toml)
@@ -1017,56 +1127,133 @@ EOF
 # Install V2Ray binary
 install_v2ray() {
     echo "📡 Installing V2Ray binary..."
+
+    local TEMP_V2RAY_DIR="v2ray_temp_install"
+    # Ensure we are in the project root ($PROJECT_NAME dir, which is current CWD for this function)
+    # before creating a subdir, to avoid issues if this function were ever called from elsewhere.
+    # However, given current script structure, CWD is already $PROJECT_NAME.
+    mkdir -p "$TEMP_V2RAY_DIR"
+
+    ( # Start subshell for temp operations
+        cd "$TEMP_V2RAY_DIR"
+
+        # Detect OS
+        OS=$(uname -s)
+        ARCH=$(uname -m)
+
+        case $OS in
+            Linux)
+                case $ARCH in
+                    x86_64) V2RAY_ARCH="linux-64" ;;
+                    aarch64|arm64) V2RAY_ARCH="linux-arm64-v8a" ;;
+                    *) V2RAY_ARCH="linux-64" ;; # Default for Linux
+                esac
+                ;;
+            Darwin)
+                case $ARCH in
+                    x86_64) V2RAY_ARCH="macos-64" ;;
+                    arm64) V2RAY_ARCH="macos-arm64-v8a" ;;
+                    *) V2RAY_ARCH="macos-64" ;; # Default for Darwin
+                esac
+                ;;
+            MINGW*|CYGWIN*|MSYS*) # Windows-like environments
+                V2RAY_ARCH="windows-64"
+                ;;
+            *) # Default for other OSes
+                V2RAY_ARCH="linux-64"
+                ;;
+        esac
+
+        echo "📥 Downloading V2Ray for $V2RAY_ARCH..."
+
+        DOWNLOAD_URL="https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-$V2RAY_ARCH.zip"
+        if command -v wget >/dev/null 2>&1; then
+            wget -O v2ray.zip "$DOWNLOAD_URL"
+        elif command -v curl >/dev/null 2>&1; then
+            curl -L -o v2ray.zip "$DOWNLOAD_URL"
+        else
+            echo "❌ Neither wget nor curl found. Cannot download V2Ray."
+            # rm -rf ../"$TEMP_V2RAY_DIR" # Clean up before exiting if needed, but subshell will exit
+            exit 1 # Exit subshell, not the main script
+        fi
+
+        if [ ! -f "v2ray.zip" ] || [ ! -s "v2ray.zip" ]; then
+            echo "❌ Failed to download V2Ray. Zip file is missing or empty."
+            exit 1 # Exit subshell
+        fi
+
+        unzip -o v2ray.zip # -o for overwrite
+        # The zip might contain v2ray.exe (windows) or v2ray (linux/mac)
+        EXECUTABLE_NAME="v2ray"
+        CTL_NAME="v2ctl" # v2ctl is usually for Linux/macOS
+        if [[ "$V2RAY_ARCH" == "windows"* ]]; then
+            EXECUTABLE_NAME="v2ray.exe"
+            CTL_NAME="" # v2ctl might not be present or named differently on Windows in the zip
+        fi
+
+        if [ -f "$EXECUTABLE_NAME" ]; then
+            chmod +x "$EXECUTABLE_NAME"
+        else
+            echo "❌ V2Ray executable ($EXECUTABLE_NAME) not found after unzip."
+            exit 1 # Exit subshell
+        fi
+
+        if [ -n "$CTL_NAME" ] && [ -f "$CTL_NAME" ]; then
+            chmod +x "$CTL_NAME"
+        fi
+
+        # Determine target directory for binaries
+        TARGET_BIN_DIR=""
+        if [[ "$OS" == "MINGW"* ]] || [[ "$OS" == "CYGWIN"* ]] || [[ "$OS" == "MSYS"* ]]; then
+            # For Windows-like, /usr/local/bin might be okay in Git Bash / MSYS2
+            # but generally not a standard user PATH.
+            # A local bin or asking user is safer. For now, stick to trying /usr/local/bin.
+            TARGET_BIN_DIR="/usr/local/bin"
+            mkdir -p "$TARGET_BIN_DIR" 2>/dev/null # Try to create if it doesn't exist
+        else # Linux/macOS
+            if [ -w "/usr/local/bin" ]; then # Check if writable first
+                TARGET_BIN_DIR="/usr/local/bin"
+            elif [ -d "$HOME/.local/bin" ] && [ -w "$HOME/.local/bin" ]; then
+                TARGET_BIN_DIR="$HOME/.local/bin"
+            elif mkdir -p "$HOME/.local/bin" 2>/dev/null && [ -w "$HOME/.local/bin" ]; then # Try to create and check writability
+                TARGET_BIN_DIR="$HOME/.local/bin"
+                echo "ℹ️ V2Ray will be installed to $TARGET_BIN_DIR (ensure this is in your PATH)."
+            fi
+        fi
+
+        # Copy binaries
+        if [ -n "$TARGET_BIN_DIR" ]; then
+            echo "Installing V2Ray binaries to $TARGET_BIN_DIR..."
+            if command -v sudo >/dev/null 2>&1 && [[ "$TARGET_BIN_DIR" == "/usr/local/bin" ]] && ! [ -w "$TARGET_BIN_DIR" ]; then
+                sudo cp "$EXECUTABLE_NAME" "$TARGET_BIN_DIR/"
+                if [ -n "$CTL_NAME" ] && [ -f "$CTL_NAME" ]; then sudo cp "$CTL_NAME" "$TARGET_BIN_DIR/"; fi
+            else
+                cp "$EXECUTABLE_NAME" "$TARGET_BIN_DIR/"
+                if [ -n "$CTL_NAME" ] && [ -f "$CTL_NAME" ]; then cp "$CTL_NAME" "$TARGET_BIN_DIR/"; fi
+            fi
+            # Verification after copy can be added here
+        else
+            echo "⚠️ Could not determine a writable target directory (/usr/local/bin or ~/.local/bin) for V2Ray binaries."
+            echo "Please ensure V2Ray is installed and in your PATH manually."
+            # Do not exit the main script, but V2Ray might not be usable by the app if not in PATH
+        fi
+        # The rest of the files from the zip (geoip.dat, geosite.dat, config.json etc.) are not copied out
+        # of TEMP_V2RAY_DIR. The main app will need its own way to manage these if required,
+        # or they should be copied to a known config location for V2Ray.
+        # For this script, we're just installing the binary to PATH.
+    ) # End subshell. If exit 1 happened in subshell, main script continues. Check subshell exit code:
     
-    # Detect OS
-    OS=$(uname -s)
-    ARCH=$(uname -m)
-    
-    case $OS in
-        Linux)
-            case $ARCH in
-                x86_64) V2RAY_ARCH="linux-64" ;;
-                aarch64|arm64) V2RAY_ARCH="linux-arm64-v8a" ;;
-                *) V2RAY_ARCH="linux-64" ;;
-            esac
-            ;;
-        Darwin)
-            case $ARCH in
-                x86_64) V2RAY_ARCH="macos-64" ;;
-                arm64) V2RAY_ARCH="macos-arm64-v8a" ;;
-                *) V2RAY_ARCH="macos-64" ;;
-            esac
-            ;;
-        MINGW*|CYGWIN*|MSYS*)
-            V2RAY_ARCH="windows-64"
-            ;;
-        *)
-            V2RAY_ARCH="linux-64"
-            ;;
-    esac
-    
-    echo "📥 Downloading V2Ray for $V2RAY_ARCH..."
-    
-    # Download latest V2Ray
-    DOWNLOAD_URL="https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-$V2RAY_ARCH.zip"
-    wget -O v2ray.zip "$DOWNLOAD_URL" || curl -L -o v2ray.zip "$DOWNLOAD_URL"
-    
-    # Extract and install
-    unzip -o v2ray.zip
-    chmod +x v2ray v2ctl 2>/dev/null || true
-    
-    # Move to system path
-    if [[ "$OS" == "MINGW"* ]] || [[ "$OS" == "CYGWIN"* ]] || [[ "$OS" == "MSYS"* ]]; then
-        mkdir -p /usr/local/bin 2>/dev/null || true
-        cp v2ray.exe /usr/local/bin/ 2>/dev/null || sudo cp v2ray.exe /usr/local/bin/ || true
-    else
-        sudo cp v2ray v2ctl /usr/local/bin/ 2>/dev/null || cp v2ray v2ctl ~/.local/bin/ 2>/dev/null || true
+    SUBSHELL_EXIT_CODE=$?
+    if [ $SUBSHELL_EXIT_CODE -ne 0 ]; then
+        echo "❌ V2Ray installation failed in subshell (exit code: $SUBSHELL_EXIT_CODE)."
+        # rm -rf "$TEMP_V2RAY_DIR" # Clean up even on failure
+        # exit 1 # Exit main script if V2Ray install is critical
     fi
     
-    # Cleanup
-    rm -f v2ray.zip *.sig *.dat *.json v2ray v2ctl *.exe 2>/dev/null || true
+    # Cleanup temporary directory
+    rm -rf "$TEMP_V2RAY_DIR"
     
-    echo "✅ V2Ray installed successfully"
+    echo "✅ V2Ray binary installation attempt finished."
 }
 
 # Build project
@@ -1079,7 +1266,7 @@ build_project() {
     echo "Run 'npm run build' to create production build"
     
     # Make the project executable
-    chmod +x package.json 2>/dev/null || true
+    # chmod +x package.json 2>/dev/null || true # package.json is not an executable
 }
 
 # Create sample config
@@ -1145,9 +1332,47 @@ main() {
     build_project
     
     echo ""
+    echo "--- Final check from main() before script exit ---"
+    echo "Current directory: $(pwd)" # This will be /app/v2ray-mvp if create_project's cd was effective
+    # To be absolutely sure about the project path for listing:
+    PROJECT_PATH_FOR_CHECK="$PWD/$PROJECT_NAME" # This assumes main() is called from /app
+    if [ "$(basename "$PWD")" = "$PROJECT_NAME" ]; then # If already in /app/v2ray-mvp
+        PROJECT_PATH_FOR_CHECK="$PWD"
+    elif [ -d "$PROJECT_NAME" ]; then # If in /app and v2ray-mvp is a subdir
+        PROJECT_PATH_FOR_CHECK="$PWD/$PROJECT_NAME"
+    else # Fallback, less certain
+        PROJECT_PATH_FOR_CHECK="$PROJECT_NAME"
+    fi
+
+    # Corrected check logic:
+    # The main script's functions (create_project, install_dependencies, etc.) operate based on the initial cd into PROJECT_NAME.
+    # So, when main() is running these functions, the CWD should be /app/v2ray-mvp.
+    # The PROJECT_NAME variable itself is just "v2ray-mvp".
+    # Files are created relative to the CWD set by `cd "$PROJECT_NAME"` in `create_project`.
+
+    # At the end of main(), the CWD should still be /app/v2ray-mvp.
+    echo "Final check CWD: $(pwd)"
+    if [ -f "package.json" ]; then # Check for package.json in current directory
+        echo "package.json FOUND in $(pwd)."
+        echo "Content of package.json:"
+        cat package.json
+    else
+        echo "package.json NOT FOUND in $(pwd) at script exit."
+        echo "Listing current directory ($(pwd)) contents:"
+        ls -la
+        # Also check relative to /app just in case CWD assumptions are wrong
+        if [ -f "/app/$PROJECT_NAME/package.json" ]; then
+             echo "package.json also found at /app/$PROJECT_NAME/package.json"
+        else
+             echo "package.json also NOT found at /app/$PROJECT_NAME/package.json"
+        fi
+    fi
+    echo "--- End of final check from main() ---"
+
+    echo ""
     echo "🎉 V2Ray MVP setup complete!"
     echo ""
-    echo "📂 Project created in: $PROJECT_NAME"
+    echo "📂 Project created in: $PROJECT_NAME" # This should refer to the relative path if called from /app
     echo ""
     echo "🚀 To start development:"
     echo "   cd $PROJECT_NAME"
